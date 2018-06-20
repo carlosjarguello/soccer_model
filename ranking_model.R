@@ -18,39 +18,111 @@ soccer_data = read_csv("soccer_stats.csv",
 
 # Model without ties:
 
-soccer_data_no_ties = soccer_data %>%
-  filter(home_score != away_score, date > "2015-01-01") %>%
-  mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
-         home_team = as.factor(home_team),
-         away_team = as.factor(away_team),
-         outcome = ifelse(home_score > away_score, 1, 0))
-
-all_teams = union(levels(soccer_data_no_ties$home_team), levels(soccer_data_no_ties$away_team))
-
-soccer_data_no_ties = soccer_data_no_ties %>%
-  mutate(home_team = factor(home_team, levels=all_teams),
-         away_team = factor(away_team, levels=all_teams)) %>%
-  select(home_team, away_team, outcome)
-
-X_design = model.matrix(data = soccer_data_no_ties, ~ home_team, 
-                        contrasts.arg=list(home_team=contrasts(soccer_data_no_ties$home_team, contrasts=F))) -
-  model.matrix(data = soccer_data_no_ties, ~ away_team, 
-               contrasts.arg=list(away_team=contrasts(soccer_data_no_ties$away_team, contrasts=F)))
-
-X_design = cbind(X_design[,-2], soccer_data_no_ties$outcome)
-X_design[,1] = 1
-colnames(X_design) <- c("home_adv", levels(soccer_data_no_ties$home_team)[-1], "game_outcome")
-design_data_no_ties = as.data.frame(X_design)
-
-# model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
-model = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial())
-skill_coef = model$coefficients[order(model$coefficients, decreasing = TRUE)]
-summary(model)
-skill_coef
+# soccer_data_no_ties = soccer_data %>%
+#   filter(home_score != away_score, date > "2015-01-01") %>%
+#   mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
+#          home_team = as.factor(home_team),
+#          away_team = as.factor(away_team),
+#          outcome = ifelse(home_score > away_score, 1, 0))
+# 
+# all_teams = union(levels(soccer_data_no_ties$home_team), levels(soccer_data_no_ties$away_team))
+# 
+# soccer_data_no_ties = soccer_data_no_ties %>%
+#   mutate(home_team = factor(home_team, levels=all_teams),
+#          away_team = factor(away_team, levels=all_teams)) %>%
+#   select(home_team, away_team, outcome)
+# 
+# X_design = model.matrix(data = soccer_data_no_ties, ~ home_team, 
+#                         contrasts.arg=list(home_team=contrasts(soccer_data_no_ties$home_team, contrasts=F))) -
+#   model.matrix(data = soccer_data_no_ties, ~ away_team, 
+#                contrasts.arg=list(away_team=contrasts(soccer_data_no_ties$away_team, contrasts=F)))
+# 
+# X_design = cbind(X_design[,-2], soccer_data_no_ties$outcome)
+# X_design[,1] = 1
+# colnames(X_design) <- c("home_adv", levels(soccer_data_no_ties$home_team)[-1], "game_outcome")
+# design_data_no_ties = as.data.frame(X_design)
+# 
+# # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
+# model = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial())
+# skill_coef = model$coefficients[order(model$coefficients, decreasing = TRUE)]
+# summary(model)
+# skill_coef
 
 # With ties:
+# Multinomial regression using Poisson trick:
+soccer_data_after_2000 = soccer_data %>% filter(date >= "2000-01-01")
 
-# Miltinomial regression using Poisson trick:
+all_teams = union(unique(soccer_data_after_2000$home_team), unique(soccer_data_after_2000$away_team))
+
+soccer_data_after_2000 = soccer_data_after_2000 %>%
+  rowwise() %>%
+  mutate("home_away" = paste0(home_team,"_",away_team))
+
+soccer_data_after_2000_poiss = soccer_data_after_2000 %>%
+  group_by(home_away) %>%
+  summarise(
+    "home_wins" = sum(home_score > away_score),
+    "away_wins" = sum(home_score < away_score),
+    "ties" = sum(home_score == away_score)
+    ) # %>%
+  # ungroup() %>%
+  # separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
+  # mutate(home = factor(home, levels = all_teams),
+  #        away = factor(away, levels = all_teams))
+
+temp = data.frame("home_away" = rep(soccer_data_after_2000_poiss$home_away,3), 
+                  "n_games" = c(soccer_data_after_2000_poiss$home_wins, soccer_data_after_2000_poiss$ties, 
+                              soccer_data_after_2000_poiss$away_wins),
+                  "result_home" = c(rep("w", length(soccer_data_after_2000_poiss$home_away)), 
+                                  rep("t", length(soccer_data_after_2000_poiss$home_away)), 
+                                  rep("l", length(soccer_data_after_2000_poiss$home_away)))) %>% 
+  arrange(home_away)
+
+temp_matrix = model.matrix(data = temp, ~ home_away)
+
+
+
+
+
+games_summary = data.frame(home_away=character(), 
+                            wins=integer(), 
+                            ties=integer(), 
+                            losses=integer()) 
+
+home_away_list = unique(soccer_data_after_1990$home_away)
+
+for(ha_game in home_away_list) {
+  temp = soccer_data_after_1990 %>% 
+    filter(home_away==ha_game)
+  wins = temp %>% filter(home_score > away_score) %>% nrow()
+  ties = temp %>% filter(home_score == away_score) %>% nrow()
+  losses = temp %>% filter(home_score < away_score) %>% nrow()
+  games_summary = rbind(games_summary, data.frame(home_away = ha_game,
+                                wins = wins,
+                                ties = ties,
+                                losses = losses))
+  soccer_data_after_1990 = soccer_data_after_1990 %>%
+    filter(home_away!=ha_game)
+  print(nrow(soccer_data_after_1990))
+  print(ha_game)
+}
+
+games_summary = games_summary %>%
+  separate(home_away, c("home","away"),"_")
+
+total_teams = union(unique(games_summary$home), unique(games_summary$away))
+
+games_summary = games_summary %>%
+  mutate(home = factor(home, levels = total_teams),
+         away = factor(away, levels = total_teams))
+
+X_design = model.matrix(data = games_summary, ~ home, 
+                        contrasts.arg=list(home=contrasts(games_summary$home, contrasts=F))) -
+  model.matrix(data = games_summary, ~ away, 
+               contrasts.arg=list(away=contrasts(games_summary$away, contrasts=F)))
+
+head(X_design)
+
 
 require(prefmod)
 
