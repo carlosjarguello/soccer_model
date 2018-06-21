@@ -16,41 +16,95 @@ soccer_data = read_csv("soccer_stats.csv",
                        ), col_names = TRUE)
 
 
+minimum_date = "2015-01-01"
+
 # Model without ties:
 
-# soccer_data_no_ties = soccer_data %>%
-#   filter(home_score != away_score, date > "2015-01-01") %>%
-#   mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
-#          home_team = as.factor(home_team),
-#          away_team = as.factor(away_team),
-#          outcome = ifelse(home_score > away_score, 1, 0))
-# 
-# all_teams = union(levels(soccer_data_no_ties$home_team), levels(soccer_data_no_ties$away_team))
-# 
-# soccer_data_no_ties = soccer_data_no_ties %>%
-#   mutate(home_team = factor(home_team, levels=all_teams),
-#          away_team = factor(away_team, levels=all_teams)) %>%
-#   select(home_team, away_team, outcome)
-# 
-# X_design = model.matrix(data = soccer_data_no_ties, ~ home_team, 
-#                         contrasts.arg=list(home_team=contrasts(soccer_data_no_ties$home_team, contrasts=F))) -
-#   model.matrix(data = soccer_data_no_ties, ~ away_team, 
-#                contrasts.arg=list(away_team=contrasts(soccer_data_no_ties$away_team, contrasts=F)))
-# 
-# X_design = cbind(X_design[,-2], soccer_data_no_ties$outcome)
-# X_design[,1] = 1
-# colnames(X_design) <- c("home_adv", levels(soccer_data_no_ties$home_team)[-1], "game_outcome")
-# design_data_no_ties = as.data.frame(X_design)
-# 
-# # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
-# model = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial())
-# skill_coef = model$coefficients[order(model$coefficients, decreasing = TRUE)]
-# summary(model)
-# skill_coef
+{
+soccer_data_no_ties = soccer_data %>%
+  filter(home_score != away_score, date > minimum_date) %>%
+  mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
+         home_team = as.factor(home_team),
+         away_team = as.factor(away_team),
+         outcome = ifelse(home_score > away_score, 1, 0))
+
+all_teams = union(levels(soccer_data_no_ties$home_team), levels(soccer_data_no_ties$away_team))
+
+soccer_data_no_ties = soccer_data_no_ties %>%
+  mutate(home_team = factor(home_team, levels=all_teams),
+         away_team = factor(away_team, levels=all_teams)) %>%
+  select(home_team, away_team, outcome)
+
+X_design = model.matrix(data = soccer_data_no_ties, ~ home_team,
+                        contrasts.arg=list(home_team=contrasts(soccer_data_no_ties$home_team, contrasts=F))) -
+  model.matrix(data = soccer_data_no_ties, ~ away_team,
+               contrasts.arg=list(away_team=contrasts(soccer_data_no_ties$away_team, contrasts=F)))
+
+X_design = cbind(X_design[,-2], soccer_data_no_ties$outcome)
+X_design[,1] = 1
+colnames(X_design) <- c("home_adv", levels(soccer_data_no_ties$home_team)[-1], "game_outcome")
+design_data_no_ties = as.data.frame(X_design)
+
+
+# model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
+model_no_ties = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial())
+skill_coef_no_ties = model_no_ties$coefficients[order(model_no_ties$coefficients, decreasing = TRUE)]
+summary(model_no_ties)
+skill_coef_no_ties
+}
+
+
+# Model with ties - Coin flip for ties:
+
+{
+  soccer_data_ties_coin_flip = soccer_data %>%
+    filter(date > minimum_date) %>%
+    mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
+           home_team = as.factor(home_team),
+           away_team = as.factor(away_team),
+           outcome = ifelse(home_score == away_score, round(runif(n=nrow(soccer_data_ties_coin_flip))),
+                            ifelse(home_score > away_score, 1, 0)))
+  
+  all_teams = union(levels(soccer_data_ties_coin_flip$home_team), levels(soccer_data_ties_coin_flip$away_team))
+  
+  soccer_data_ties_coin_flip = soccer_data_ties_coin_flip %>%
+    mutate(home_team = factor(home_team, levels=all_teams),
+           away_team = factor(away_team, levels=all_teams)) %>%
+    select(home_team, away_team, outcome)
+  
+  X_design = model.matrix(data = soccer_data_ties_coin_flip, ~ home_team,
+                          contrasts.arg=list(home_team=contrasts(soccer_data_ties_coin_flip$home_team, contrasts=F))) -
+    model.matrix(data = soccer_data_ties_coin_flip, ~ away_team,
+                 contrasts.arg=list(away_team=contrasts(soccer_data_ties_coin_flip$away_team, contrasts=F)))
+  
+  X_design = cbind(X_design[,-2], soccer_data_ties_coin_flip$outcome)
+  X_design[,1] = 1
+  colnames(X_design) <- c("home_adv", levels(soccer_data_ties_coin_flip$home_team)[-1], "game_outcome")
+  design_data_ties_coin_flip = as.data.frame(X_design)
+  
+  
+  # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
+  model_ties_coin_flip = glm(data = design_data_ties_coin_flip, game_outcome ~ . -1, family = binomial())
+  skill_coef_coin_flip = model_ties_coin_flip$coefficients[order(model_ties_coin_flip$coefficients, decreasing = TRUE)]
+  summary(model_ties_coin_flip)
+  skill_coef_coin_flip
+}
+
 
 # With ties:
 # Multinomial regression using Poisson trick:
-soccer_data_after_2000 = soccer_data %>% filter(date >= "2015-01-01")
+soccer_data_after_2000 = soccer_data %>% filter(date >= "2016-01-01")
+
+soccer_data_with_ties = soccer_data %>%
+  filter(date > "2016-01-01") %>%
+  group_by(home_team) %>%
+  filter(n() >= 3) %>%
+  ungroup() %>%
+  group_by(away_team) %>%
+  filter(n() >= 3) %>%
+  ungroup() %>%
+  filter(home_team %in% away_team) %>%
+  filter(away_team %in% home_team)
 
 all_teams = union(unique(soccer_data_after_2000$home_team), unique(soccer_data_after_2000$away_team))
 
@@ -135,10 +189,12 @@ num_teams = length(levels(soccer_data_after_2000_poiss[['home']]))
 team_skill_vec = rep(0, num_teams+1)  # num_teams + delta , no home adv
 names(team_skill_vec) = c("home_adv", levels(soccer_data_after_2000_poiss[['home']]))
 
+ptm = proc.time()
 result = optim(team_skill_vec, loglik, 
                data_games=soccer_data_after_2000_grouped,
                method='BFGS', 
                control=list('fnscale'=-1))
+toc = proc.time() - ptm
 
 team_rankings = data.frame(teams, strength = result$par[-1]) %>%
   arrange(desc(strength))
