@@ -113,7 +113,6 @@ loglik = function(team_skill_vec, data_games) {
   total_llik = 0
   delta = team_skill_vec[["home_adv"]]
   data_games = data_games %>%
-    rowwise() %>%
     mutate(log_p_home_win = team_skill_vec[[home]] - log(exp(team_skill_vec[[home]]) + 
                                                       exp(team_skill_vec[[away]]) + 
                                                       exp(delta)*exp(0.5*(team_skill_vec[[home]]+
