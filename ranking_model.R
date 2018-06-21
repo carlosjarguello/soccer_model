@@ -50,7 +50,7 @@ soccer_data = read_csv("soccer_stats.csv",
 
 # With ties:
 # Multinomial regression using Poisson trick:
-soccer_data_after_2000 = soccer_data %>% filter(date >= "2000-01-01")
+soccer_data_after_2000 = soccer_data %>% filter(date >= "2015-01-01")
 
 all_teams = union(unique(soccer_data_after_2000$home_team), unique(soccer_data_after_2000$away_team))
 
@@ -64,128 +64,30 @@ soccer_data_after_2000_poiss = soccer_data_after_2000 %>%
     "home_wins" = sum(home_score > away_score),
     "away_wins" = sum(home_score < away_score),
     "ties" = sum(home_score == away_score)
-    ) # %>%
-  # ungroup() %>%
-  # separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
-  # mutate(home = factor(home, levels = all_teams),
-  #        away = factor(away, levels = all_teams))
+  ) %>%
+  ungroup() 
 
-temp = data.frame("home_away" = rep(soccer_data_after_2000_poiss$home_away,3), 
+soccer_data_after_2000_poiss = data.frame("home_away" = rep(soccer_data_after_2000_poiss$home_away,3), 
                   "n_games" = c(soccer_data_after_2000_poiss$home_wins, soccer_data_after_2000_poiss$ties, 
-                              soccer_data_after_2000_poiss$away_wins),
+                                soccer_data_after_2000_poiss$away_wins),
                   "result_home" = c(rep("w", length(soccer_data_after_2000_poiss$home_away)), 
-                                  rep("t", length(soccer_data_after_2000_poiss$home_away)), 
-                                  rep("l", length(soccer_data_after_2000_poiss$home_away)))) %>% 
-  arrange(home_away)
+                                    rep("t", length(soccer_data_after_2000_poiss$home_away)), 
+                                    rep("l", length(soccer_data_after_2000_poiss$home_away)))) %>% 
+  arrange(home_away) %>% 
+  separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
+  mutate(home = factor(home, levels = all_teams),
+         away = factor(away, levels = all_teams))
 
-temp_matrix = model.matrix(data = temp, ~ home_away)
+aij_matrix = model.matrix(data = temp, ~ home_away)
+y_obs = temp$n_games
+ai_matrix = model.matrix(data = temp, ~home)*rep(c(1,0,0.5), nrow(soccer_data_after_2000_poiss))
+aj_matrix = model.matrix(data = temp, ~away)*rep(c(0,1,0.5), nrow(soccer_data_after_2000_poiss))
 
+design_matrix = cbind(ai_matrix + aj_matrix, -aij_matrix)
+design_matrix[,1] = 1
+design_matrix[,1] = design_matrix[,1]*c(0,0,1) 
 
-
-
-
-games_summary = data.frame(home_away=character(), 
-                            wins=integer(), 
-                            ties=integer(), 
-                            losses=integer()) 
-
-home_away_list = unique(soccer_data_after_1990$home_away)
-
-for(ha_game in home_away_list) {
-  temp = soccer_data_after_1990 %>% 
-    filter(home_away==ha_game)
-  wins = temp %>% filter(home_score > away_score) %>% nrow()
-  ties = temp %>% filter(home_score == away_score) %>% nrow()
-  losses = temp %>% filter(home_score < away_score) %>% nrow()
-  games_summary = rbind(games_summary, data.frame(home_away = ha_game,
-                                wins = wins,
-                                ties = ties,
-                                losses = losses))
-  soccer_data_after_1990 = soccer_data_after_1990 %>%
-    filter(home_away!=ha_game)
-  print(nrow(soccer_data_after_1990))
-  print(ha_game)
-}
-
-games_summary = games_summary %>%
-  separate(home_away, c("home","away"),"_")
-
-total_teams = union(unique(games_summary$home), unique(games_summary$away))
-
-games_summary = games_summary %>%
-  mutate(home = factor(home, levels = total_teams),
-         away = factor(away, levels = total_teams))
-
-X_design = model.matrix(data = games_summary, ~ home, 
-                        contrasts.arg=list(home=contrasts(games_summary$home, contrasts=F))) -
-  model.matrix(data = games_summary, ~ away, 
-               contrasts.arg=list(away=contrasts(games_summary$away, contrasts=F)))
-
-head(X_design)
-
-
-require(prefmod)
-
-teams_comb = expand.grid(all_teams, all_teams) %>% filter(Var1 != Var2)
-
-soccer_data_with_ties = soccer_data  %>% 
-  mutate(outcome = ifelse(home_score == away_score, "tie", 
-                          ifelse(home_score > away_score, "win", "loss")))
-
-teams_comb = teams_comb %>%
-  mutate()
-
-
-
-
-countries_SA = c("Argentina", 
-                 "Brasil", 
-                 "Colombia", 
-                 "Peru", 
-                 "Chile", 
-                 "Ecuador",
-                 "Bolivia",
-                 "Venezuela",
-                 "Uruguay",
-                 "Paraguay")
-
-soccer_south_america = soccer_data_with_ties %>% 
-  filter(home_team %in% countries_SA & away_team %in% countries_SA)
-
-soccer_south_america%>% View()
-
-des=llbt.design(soccer_south_america, nitems=10)
-
-
-
-
-# baseball example (Agresti, 2002, p. 437)
-# pseudodata for generating a design matrix
-# pseudo <- data.frame(rbind(c(rep(1, 21), cov = 1), 
-#                            c(rep(-1, 21), cov = 2)))
-# 
-# objnames <- c("MIL", "DET", "TOR", "NY", "BOS", "CLE", "BAL")
-# dsg <- llbt.design(pseudo, nitems = 7, objnames = objnames, cat.scovs = "cov")
-# dsg$mu <- gl(42, 2)
-# dsg$y <- baseball
-# dsg
-# 
-# mod.bb.0 <- gnm(y ~ MIL + DET + TOR + NY + BOS + CLE + BAL, 
-#                 eliminate = mu, family = poisson, data = dsg)
-# 
-# home <- c(rep(1:0, 21), rep(0:1, 21))
-# 
-# mod.bb.1 <- update(mod.bb.0, . ~ . + home)
-# 
-# anova(mod.bb.0, mod.bb.1)
-# mod.bb.1$coefficients
-# plogis(coef(mod.bb.1)["MIL"])
-# psych::logistic(coef(mod.bb.1)["MIL"])
-
-
-
-
-
+model = glm.fit(x = design_matrix, y = y_obs, family = poisson())
 
 
 # With ties:
@@ -202,51 +104,40 @@ des=llbt.design(soccer_south_america, nitems=10)
 #   filter(home_team %in% away_team) %>%
 #   filter(away_team %in% home_team)
 
-soccer_data_with_ties = soccer_data  %>% 
-  mutate(outcome = ifelse(home_score == away_score, "tie", 
-                          ifelse(home_score > away_score, "win", "loss")))
 
-teams = sort(unique(soccer_data_with_ties$home_team))
-soccer_data_with_ties = soccer_data_with_ties %>% 
-  rowwise %>%
-  mutate(home_team_index = which(teams == home_team),
-         away_team_index = which(teams == away_team))
-
-loglik = function(theta, Home, Away, Y) {
-  total_log_lik = 0
-  for (row_n in seq(1,length(Y))) {
-    outcome = Y[row_n]
-    alpha_i = theta[Home[row_n]+1]
-    alpha_j = theta[Away[row_n]+1]
-    theta[2] = 1 # Use first team as reference
-    delta = theta[1]
+loglik = function(team_skill_vec, data_games) {
+  team_skill_vec[["Afghanistan"]] = 1 # Use first team as reference
+  total_llik = 0
+  for (row in 1:nrow(data_games)) {
+    partial_llik = 0
+    outcome = data_games[row, "result_home"]
+    alpha_i = team_skill_vec[[data_games[row, "home"]]]
+    alpha_j = team_skill_vec[[data_games[row, "away"]]]
+    delta = team_skill_vec[["home_adv"]]
     Aij = log(exp(alpha_i) + exp(alpha_j) + exp(delta)*exp(0.5*(alpha_i+alpha_j)))
     log_pij1 = alpha_i - Aij
     log_pij2 = alpha_j - Aij
     log_pij3 = delta+0.5*(alpha_i+alpha_j) - Aij
-    part_lik = 0
-    if (outcome == "tie") {
-      part_lik = log_pij3
-    } else if (outcome == "win") {
-      part_lik = log_pij1
+    if (outcome == "t") {
+      partial_llik = log_pij3
+    } else if (outcome == "w") {
+      partial_llik = log_pij1
     } else {
-      part_lik = log_pij2
+      partial_llik = log_pij2
     }
-    total_log_lik = total_log_lik + part_lik
+    total_llik = total_llik + data_games[row, "n_games"]*partial_llik
   }
-  return(total_log_lik)
+  return(total_llik)
 }
-
 
 # Gotta dummify the teams. We'll use Albania as reference (alpha_1 = 0)
 
-num_teams = length(unique(soccer_data_with_ties$home_team))
-theta0 = rep(0, num_teams+1)  # num_teams + delta , no home adv
+num_teams = length(levels(soccer_data_after_2000_poiss[['home']]))
+team_skill_vec = rep(0, num_teams+1)  # num_teams + delta , no home adv
+names(team_skill_vec) = c("home_adv", levels(soccer_data_after_2000_poiss[['home']]))
 
-result = optim(theta0, loglik, 
-               Home=soccer_data_with_ties$home_team_index, 
-               Away=soccer_data_with_ties$away_team_index, 
-               Y=soccer_data_with_ties$outcome,
+result = optim(team_skill_vec, loglik, 
+               data_games=soccer_data_after_2000_poiss,
                method='BFGS', 
                control=list('fnscale'=-1))
 
