@@ -16,7 +16,7 @@ soccer_data = read_csv("soccer_stats.csv",
                        ), col_names = TRUE)
 
 
-minimum_date = "2015-01-01"
+minimum_date = "2014-01-01"
 
 # Model without ties:
 
@@ -26,14 +26,16 @@ soccer_data_no_ties = soccer_data %>%
   mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
          home_team = as.factor(home_team),
          away_team = as.factor(away_team),
-         outcome = ifelse(home_score > away_score, 1, 0))
+         outcome = ifelse(home_score > away_score, 1, 0),
+         tournament_value = ifelse(tournament=="Friendly", 0.3, 1)) %>%
+    arrange(date)
 
 all_teams = union(levels(soccer_data_no_ties$home_team), levels(soccer_data_no_ties$away_team))
 
 soccer_data_no_ties = soccer_data_no_ties %>%
   mutate(home_team = factor(home_team, levels=all_teams),
          away_team = factor(away_team, levels=all_teams)) %>%
-  select(home_team, away_team, outcome)
+  select(date, home_team, away_team, outcome, tournament_value)
 
 X_design = model.matrix(data = soccer_data_no_ties, ~ home_team,
                         contrasts.arg=list(home_team=contrasts(soccer_data_no_ties$home_team, contrasts=F))) -
@@ -45,32 +47,39 @@ X_design[,1] = 1
 colnames(X_design) <- c("home_adv", levels(soccer_data_no_ties$home_team)[-1], "game_outcome")
 design_data_no_ties = as.data.frame(X_design)
 
+decay_constant = 0.5*1/365
+weights_time = exp(-decay_constant*as.numeric(tail(soccer_data_no_ties$date,1)-
+                                                soccer_data_no_ties$date))*soccer_data_no_ties$tournament_value
 
 # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
-model_no_ties = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial())
+model_no_ties = glm(data = design_data_no_ties, game_outcome ~ . -1, family = binomial(), weights = weights_time)
 skill_coef_no_ties = model_no_ties$coefficients[order(model_no_ties$coefficients, decreasing = TRUE)]
 summary(model_no_ties)
 skill_coef_no_ties
 }
 
 
-# Model with ties - Coin flip for ties:
+# Model with ties - Coin flip for ties - (should execute several cycles and average?):
 
 {
   soccer_data_ties_coin_flip = soccer_data %>%
-    filter(date > minimum_date) %>%
+    filter(date > minimum_date) 
+  
+  soccer_data_ties_coin_flip = soccer_data_ties_coin_flip %>%
     mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
            home_team = as.factor(home_team),
            away_team = as.factor(away_team),
            outcome = ifelse(home_score == away_score, round(runif(n=nrow(soccer_data_ties_coin_flip))),
-                            ifelse(home_score > away_score, 1, 0)))
+                            ifelse(home_score > away_score, 1, 0)),
+           tournament_value = ifelse(tournament=="Friendly", 0.5, 1)) %>%
+    arrange(date)
   
   all_teams = union(levels(soccer_data_ties_coin_flip$home_team), levels(soccer_data_ties_coin_flip$away_team))
   
   soccer_data_ties_coin_flip = soccer_data_ties_coin_flip %>%
     mutate(home_team = factor(home_team, levels=all_teams),
            away_team = factor(away_team, levels=all_teams)) %>%
-    select(home_team, away_team, outcome)
+    select(date, home_team, away_team, outcome, tournament_value)
   
   X_design = model.matrix(data = soccer_data_ties_coin_flip, ~ home_team,
                           contrasts.arg=list(home_team=contrasts(soccer_data_ties_coin_flip$home_team, contrasts=F))) -
@@ -82,12 +91,80 @@ skill_coef_no_ties
   colnames(X_design) <- c("home_adv", levels(soccer_data_ties_coin_flip$home_team)[-1], "game_outcome")
   design_data_ties_coin_flip = as.data.frame(X_design)
   
+  decay_constant = 0.5*1/365
+  weights_time = (exp(-decay_constant*as.numeric(tail(soccer_data_ties_coin_flip$date,1)-
+                                                  soccer_data_ties_coin_flip$date))*
+                    soccer_data_ties_coin_flip$tournament_value)
   
   # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
-  model_ties_coin_flip = glm(data = design_data_ties_coin_flip, game_outcome ~ . -1, family = binomial())
+  model_ties_coin_flip = glm(data = design_data_ties_coin_flip, game_outcome ~ . -1, 
+                             family = binomial(), weights = weights_time)
   skill_coef_coin_flip = model_ties_coin_flip$coefficients[order(model_ties_coin_flip$coefficients, decreasing = TRUE)]
   summary(model_ties_coin_flip)
   skill_coef_coin_flip
+}
+
+
+# Model with ties - Split each tie in two, with one game going to each team:
+
+{
+  soccer_data_ties_split = soccer_data %>%
+    filter(date > minimum_date) 
+  
+  soccer_data_ties_split_no_ties = soccer_data_ties_split %>%
+    mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
+           home_team = as.factor(home_team),
+           away_team = as.factor(away_team)) %>%
+    filter(home_score != away_score) %>%
+    mutate(outcome = ifelse(home_score > away_score, 1, 0), 
+           tournament_value = ifelse(tournament=="Friendly", 0.3, 1)) %>%
+    arrange(date)
+  
+  soccer_data_ties_split_only_ties =  soccer_data_ties_split %>%
+    mutate(w_loc = ifelse(neutral, 0, ifelse(home_score>away_score, 1, -1)),
+           home_team = as.factor(home_team),
+           away_team = as.factor(away_team)) %>%
+    filter(home_score == away_score) 
+  
+  soccer_data_ties_split = bind_rows(soccer_data_ties_split_no_ties, 
+                                     soccer_data_ties_split_only_ties %>% 
+                                       mutate(w_loc = ifelse(neutral, 0, 1),
+                                              outcome = 1),
+                                     soccer_data_ties_split_only_ties %>% 
+                                       mutate(w_loc = ifelse(neutral, 0, -1),
+                                              outcome = 0)) %>%
+    arrange(date)
+  
+  all_teams = union(levels(soccer_data_ties_split$home_team), levels(soccer_data_ties_split$away_team))
+  
+  soccer_data_ties_split = soccer_data_ties_split %>%
+    mutate(home_team = factor(home_team, levels=all_teams),
+           away_team = factor(away_team, levels=all_teams)) %>%
+    select(date, home_team, away_team, outcome, tournament_value)
+  
+  X_design = model.matrix(data = soccer_data_ties_split, ~ home_team,
+                          contrasts.arg=list(home_team=contrasts(soccer_data_ties_split$home_team, contrasts=F))) -
+    model.matrix(data = soccer_data_ties_split, ~ away_team,
+                 contrasts.arg=list(away_team=contrasts(soccer_data_ties_split$away_team, contrasts=F)))
+  
+  X_design = cbind(X_design[,-2], soccer_data_ties_split$outcome)
+  X_design[,1] = 1
+  colnames(X_design) <- c("home_adv", levels(soccer_data_ties_split$home_team)[-1], "game_outcome")
+  design_data_ties_split_ties = as.data.frame(X_design)
+  
+  decay_constant = 0.5*1/365
+  weights_time = (exp(-decay_constant*as.numeric(tail(soccer_data_ties_split$date,1)-
+                                                   soccer_data_ties_split$date))*
+                    soccer_data_ties_split$tournament_value)
+  
+  # model = glm.fit(X_design, soccer_data_no_ties$outcome, family = binomial())
+  model_ties_split_ties = glm(data = design_data_ties_split_ties, game_outcome ~ . -1, 
+                              family = binomial(), weights = weights_time)
+  skill_coef_split_ties = model_ties_split_ties$coefficients[order(model_ties_split_ties$coefficients, 
+                                                                   decreasing = TRUE)]
+  summary(model_ties_split_ties)
+  model_ties_split_ties
+  skill_coef_split_ties
 }
 
 
