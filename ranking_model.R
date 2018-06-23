@@ -16,7 +16,7 @@ soccer_data = read_csv("soccer_stats.csv",
                        ), col_names = TRUE)
 
 
-minimum_date = "2014-01-01"
+minimum_date = "2016-01-01"
 
 # Model without ties:
 
@@ -57,7 +57,6 @@ skill_coef_no_ties = model_no_ties$coefficients[order(model_no_ties$coefficients
 summary(model_no_ties)
 skill_coef_no_ties
 }
-
 
 # Model with ties - Coin flip for ties - (should execute several cycles and average?):
 
@@ -103,7 +102,6 @@ skill_coef_no_ties
   summary(model_ties_coin_flip)
   skill_coef_coin_flip
 }
-
 
 # Model with ties - Split each tie in two, with one game going to each team:
 
@@ -167,9 +165,77 @@ skill_coef_no_ties
   skill_coef_split_ties
 }
 
+# Model with ties - Trinomial MLE:
+
+{
+
+soccer_data_compact = soccer_data %>%
+  filter(date > minimum_date) 
+
+all_teams = sort(union(unique(soccer_data_compact$home_team), unique(soccer_data_compact$away_team)))
+
+soccer_data_compact = soccer_data_compact %>%
+  rowwise() %>%
+  mutate("home_away" = paste0(home_team,"_",away_team)) %>%
+  group_by(home_away) %>%
+  summarise(
+    "home_wins" = sum(home_score > away_score),
+    "away_wins" = sum(home_score < away_score),
+    "ties" = sum(home_score == away_score),
+    "total_games" = home_wins+away_wins+ties
+  ) %>%
+  ungroup() %>%
+  separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
+  mutate(home_team = factor(home, levels = all_teams),
+         away_team = factor(away, levels = all_teams))
+
+num_teams = length(levels(soccer_data_compact$home_team))
+
+soccer_data_compact = soccer_data_compact %>%
+  rowwise %>% 
+  mutate(home_team_index = which(all_teams == home_team), 
+         away_team_index = which(all_teams == away_team))
+
+# Gotta dummify the teams. We'll use first team as reference (alpha_1 = 0)
+team_skill_vec = rep(0,num_teams+2)  # num_teams + delta + home adv
+
+loglik = function(theta, data_games) {
+  total_llik = 0
+  Home=data_games$home_team_index
+  Away=data_games$away_team_index
+  home_wins = data_games$home_wins
+  away_wins = data_games$away_wins
+  ties = data_games$ties
+  theta[3] = 1
+  delta_ties = theta[1]
+  eta_home_adv = theta[2]
+  for (row_n in seq(1,nrow(data_games))) {
+    alpha_i = theta[Home[row_n]+1]
+    alpha_j = theta[Away[row_n]+1]
+    Aij = log(exp(alpha_i+eta_home_adv) + exp(alpha_j) + exp(delta_ties)*exp(0.5*(alpha_i+alpha_j+eta_home_adv))) 
+    log_pij1 = alpha_i - Aij + eta_home_adv
+    log_pij2 = alpha_j - Aij 
+    log_pij3 = delta_ties+0.5*(alpha_i+alpha_j+eta_home_adv) - Aij 
+    total_llik = total_llik + home_wins[row_n]*log_pij1 + away_wins[row_n]*log_pij2 + ties[row_n]*log_pij3
+  }
+  return(total_llik)
+}
+
+result = optim(team_skill_vec, loglik, 
+               data_games=soccer_data_compact,
+               method='BFGS', 
+               control=list('fnscale'=-1))
+
+skill_coef_with_ties = data.frame(all_teams, strength = result$par[-(1r:2)]) %>%
+  arrange(desc(strength))
+
+print(skill_coef_with_ties)
+}
 
 # With ties:
-# Multinomial regression using Poisson trick:
+# Multinomial regression using Poisson trick (not working)
+
+{
 soccer_data_after_2000 = soccer_data %>% filter(date >= "2016-01-01")
 
 soccer_data_with_ties = soccer_data %>%
@@ -222,59 +288,5 @@ design_matrix[,1] = 1
 design_matrix[,1] = design_matrix[,1]*c(0,0,1) 
 
 model = glm.fit(x = design_matrix, y = y_obs, family = poisson())
-
-
-# With ties:
-
-
-# soccer_data_with_ties = soccer_data %>%
-#   filter(date > "2016-01-01") %>%
-#   group_by(home_team) %>%
-#   filter(n() >= 3) %>%
-#   ungroup() %>%
-#   group_by(away_team) %>%
-#   filter(n() >= 3) %>%
-#   ungroup() %>%
-#   filter(home_team %in% away_team) %>%
-#   filter(away_team %in% home_team)
-
-
-loglik = function(team_skill_vec, data_games) {
-  team_skill_vec[["Afghanistan"]] = 1 # Use first team as reference
-  total_llik = 0
-  delta = team_skill_vec[["home_adv"]]
-  data_games = data_games %>%
-    mutate(log_p_home_win = team_skill_vec[[home]] - log(exp(team_skill_vec[[home]]) + 
-                                                      exp(team_skill_vec[[away]]) + 
-                                                      exp(delta)*exp(0.5*(team_skill_vec[[home]]+
-                                                                            team_skill_vec[[away]]))),
-           log_p_away_win = team_skill_vec[[away]] - log(exp(team_skill_vec[[home]]) + 
-                                                      exp(team_skill_vec[[away]]) + 
-                                                      exp(delta)*exp(0.5*(team_skill_vec[[home]]+
-                                                                            team_skill_vec[[away]]))),
-           log_p_tie = (delta+0.5*(team_skill_vec[[home]]+team_skill_vec[[away]]) - 
-                      log(exp(team_skill_vec[[home]]) + exp(team_skill_vec[[away]]) + 
-                             exp(delta)*exp(0.5*(team_skill_vec[[home]] + team_skill_vec[[away]])))),
-           partial_log_lik = home_wins*log_p_home_win+away_wins*log_p_away_win+ties*log_p_tie) 
-  
-  return(sum(data_games$partial_log_lik))
 }
-
-# Gotta dummify the teams. We'll use Albania as reference (alpha_1 = 0)
-
-num_teams = length(levels(soccer_data_after_2000_poiss[['home']]))
-team_skill_vec = rep(0, num_teams+1)  # num_teams + delta , no home adv
-names(team_skill_vec) = c("home_adv", levels(soccer_data_after_2000_poiss[['home']]))
-
-ptm = proc.time()
-result = optim(team_skill_vec, loglik, 
-               data_games=soccer_data_after_2000_grouped,
-               method='BFGS', 
-               control=list('fnscale'=-1))
-toc = proc.time() - ptm
-
-team_rankings = data.frame(teams, strength = result$par[-1]) %>%
-  arrange(desc(strength))
-
-print(team_rankings)
 
