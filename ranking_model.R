@@ -171,7 +171,7 @@ skill_coef_no_ties
 
 soccer_data_compact = soccer_data %>%
   filter(date > minimum_date) 
-
+  
 all_teams = sort(union(unique(soccer_data_compact$home_team), unique(soccer_data_compact$away_team)))
 
 soccer_data_compact = soccer_data_compact %>%
@@ -185,9 +185,9 @@ soccer_data_compact = soccer_data_compact %>%
     "total_games" = home_wins+away_wins+ties
   ) %>%
   ungroup() %>%
-  separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
-  mutate(home_team = factor(home, levels = all_teams),
-         away_team = factor(away, levels = all_teams))
+  separate(home_away, sep = "_", remove = FALSE, into = c("home_team","away_team")) %>%
+  mutate(home_team = factor(home_team, levels = all_teams),
+         away_team = factor(away_team, levels = all_teams))
 
 num_teams = length(levels(soccer_data_compact$home_team))
 
@@ -210,11 +210,11 @@ loglik = function(theta, data_games) {
   delta_ties = theta[1]
   eta_home_adv = theta[2]
   for (row_n in seq(1,nrow(data_games))) {
-    alpha_i = theta[Home[row_n]+1]
-    alpha_j = theta[Away[row_n]+1]
-    Aij = log(exp(alpha_i+eta_home_adv) + exp(alpha_j) + exp(delta_ties)*exp(0.5*(alpha_i+alpha_j+eta_home_adv))) 
-    log_pij1 = alpha_i - Aij + eta_home_adv
-    log_pij2 = alpha_j - Aij 
+    alpha_i = theta[Home[row_n]+2]
+    alpha_j = theta[Away[row_n]+2]
+    Aij = log(exp(alpha_i) + exp(alpha_j+eta_home_adv) + exp(delta_ties + 0.5*(alpha_i+alpha_j+eta_home_adv))) 
+    log_pij1 = alpha_i - Aij
+    log_pij2 = alpha_j + eta_home_adv - Aij 
     log_pij3 = delta_ties+0.5*(alpha_i+alpha_j+eta_home_adv) - Aij 
     total_llik = total_llik + home_wins[row_n]*log_pij1 + away_wins[row_n]*log_pij2 + ties[row_n]*log_pij3
   }
@@ -226,8 +226,7 @@ result = optim(team_skill_vec, loglik,
                method='BFGS', 
                control=list('fnscale'=-1))
 
-skill_coef_with_ties = data.frame(all_teams, strength = result$par[-(1r:2)]) %>%
-  arrange(desc(strength))
+skill_coef_with_ties = data.frame(c("tie_param", "home_adv", all_teams), strength = result$par)
 
 print(skill_coef_with_ties)
 }
