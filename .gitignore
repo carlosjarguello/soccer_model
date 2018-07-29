@@ -2,5 +2,5 @@
 *.Rproj
 *.DS_Store
 *.Rhistory
-
-.Rproj.user
+*.Rapp.history
+*.Rproj.user
