@@ -2,7 +2,7 @@
 
 library(tidyverse)
 
-soccer_data = read_csv("soccer_stats.csv",
+soccer_data = read_csv("soccer_stats_0623.csv",
                        cols(
                          date = col_date(format = ""),
                          home_team = col_character(),
@@ -13,8 +13,8 @@ soccer_data = read_csv("soccer_stats.csv",
                          city = col_character(),
                          country = col_character(),
                          neutral = col_logical()
-                       ), col_names = TRUE)
-
+                       ), col_names = TRUE) %>%
+  filter(date <= "2018-06-17")
 
 minimum_date = "2016-01-01"
 
@@ -170,7 +170,7 @@ skill_coef_no_ties
 {
 
 soccer_data_compact = soccer_data %>%
-  filter(date > minimum_date) 
+  filter(date > minimum_date)
   
 all_teams = sort(union(unique(soccer_data_compact$home_team), unique(soccer_data_compact$away_team)))
 
@@ -208,7 +208,7 @@ loglik = function(theta, data_games) {
   ties = data_games$ties
   theta[3] = 1
   delta_ties = theta[1]
-  eta_home_adv = theta[2]
+  eta_home_adv = 0*theta[2]
   for (row_n in seq(1,nrow(data_games))) {
     alpha_i = theta[Home[row_n]+2]
     alpha_j = theta[Away[row_n]+2]
@@ -226,66 +226,45 @@ result = optim(team_skill_vec, loglik,
                method='BFGS', 
                control=list('fnscale'=-1))
 
-skill_coef_with_ties = data.frame(c("tie_param", "home_adv", all_teams), strength = result$par)
-
+skill_coef_with_ties = data.frame(all_teams, relative_skill = result$par[-(1:2)]) %>% arrange(desc(relative_skill))
+names(skill_coef_with_ties)[1] = "Team"
 print(skill_coef_with_ties)
+wc_teams = read_csv("WC_teams.csv")
+wc_skill = skill_coef_with_ties %>%
+  right_join(wc_teams, by="Team")
+wc_skill
 }
 
 # With ties:
 # Multinomial regression using Poisson trick (not working)
 
 {
-soccer_data_after_2000 = soccer_data %>% filter(date >= "2016-01-01")
 
-soccer_data_with_ties = soccer_data %>%
-  filter(date > "2016-01-01") %>%
-  group_by(home_team) %>%
-  filter(n() >= 3) %>%
-  ungroup() %>%
-  group_by(away_team) %>%
-  filter(n() >= 3) %>%
-  ungroup() %>%
-  filter(home_team %in% away_team) %>%
-  filter(away_team %in% home_team)
 
-all_teams = union(unique(soccer_data_after_2000$home_team), unique(soccer_data_after_2000$away_team))
 
-soccer_data_after_2000 = soccer_data_after_2000 %>%
-  rowwise() %>%
-  mutate("home_away" = paste0(home_team,"_",away_team))
-
-soccer_data_after_2000_grouped = soccer_data_after_2000 %>%
-  group_by(home_away) %>%
-  summarise(
-    "home_wins" = sum(home_score > away_score),
-    "away_wins" = sum(home_score < away_score),
-    "ties" = sum(home_score == away_score)
-  ) %>%
-  ungroup() %>%
-  separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
-  mutate(home = factor(home, levels = all_teams),
-         away = factor(away, levels = all_teams))
-
-soccer_data_after_2000_poiss = data.frame("home_away" = rep(soccer_data_after_2000_grouped$home_away,3), 
-                  "n_games" = c(soccer_data_after_2000_grouped$home_wins, soccer_data_after_2000_grouped$ties, 
-                                soccer_data_after_2000_grouped$away_wins),
-                  "result_home" = c(rep("w", nrow(soccer_data_after_2000_grouped)), 
-                                    rep("t", nrow(soccer_data_after_2000_grouped)), 
-                                    rep("l", nrow(soccer_data_after_2000_grouped)))) %>% 
+soccer_data_poiss = as.tibble(data.frame("home_away" = rep(soccer_data_compact$home_away,3), 
+                  "n_games" = c(soccer_data_compact$home_wins, soccer_data_compact$ties, 
+                                soccer_data_compact$away_wins),
+                  "result_home" = c(rep("w", nrow(soccer_data_compact)), 
+                                    rep("t", nrow(soccer_data_compact)), 
+                                    rep("l", nrow(soccer_data_compact)))) %>% 
   arrange(home_away) %>% 
   separate(home_away, sep = "_", remove = FALSE, into = c("home","away")) %>%
   mutate(home = factor(home, levels = all_teams),
-         away = factor(away, levels = all_teams))
+         away = factor(away, levels = all_teams)))
 
-aij_matrix = model.matrix(data = temp, ~ home_away)
-y_obs = temp$n_games
-ai_matrix = model.matrix(data = temp, ~home)*rep(c(1,0,0.5), nrow(soccer_data_after_2000_poiss))
-aj_matrix = model.matrix(data = temp, ~away)*rep(c(0,1,0.5), nrow(soccer_data_after_2000_poiss))
+aij_matrix = model.matrix(data = soccer_data_poiss, ~ home_away)
+y_obs = soccer_data_poiss$n_games
+ai_matrix = model.matrix(data = soccer_data_poiss, ~home)*rep(c(1,0,0.5), nrow(soccer_data_poiss))
+aj_matrix = model.matrix(data = soccer_data_poiss, ~away)*rep(c(0,1,0.5), nrow(soccer_data_poiss))
 
 design_matrix = cbind(ai_matrix + aj_matrix, -aij_matrix)
 design_matrix[,1] = 1
 design_matrix[,1] = design_matrix[,1]*c(0,0,1) 
 
 model = glm.fit(x = design_matrix, y = y_obs, family = poisson())
+temp = sort(model$coefficients[1:200], decreasing = TRUE)
+print(temp[1:20])
+print(head(skill_coef_with_ties,20))
 }
 
